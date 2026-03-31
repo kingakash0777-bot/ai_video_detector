@@ -14,7 +14,7 @@ os.makedirs("model", exist_ok=True)
 # Load face detector
 face_cascade = cv2.CascadeClassifier("haarcascade_frontalface_default.xml")
 
-# 🔥 Load AI model safely
+# 🔥 Safe AI model loading
 model = None
 MODEL_PATH = "model/deepfake_model.h5"
 
@@ -23,7 +23,8 @@ try:
         model = load_model(MODEL_PATH)
         print("✅ AI model loaded successfully")
     else:
-        print("⚠️ Model file not found, using smart logic")
+        print("⚠️ Model not found, using smart logic")
+        model = None
 except Exception as e:
     print(f"❌ Model load failed: {e}")
     model = None
@@ -111,15 +112,18 @@ def analyze_video_logic(video_path):
     else:
         score += 0.2
 
+    print(f"[DEBUG] Smart Score: {score:.2f}")
+
     if score > 0:
         return "Likely Real", round(min(score, 1.0), 2)
     else:
         return "Likely Fake", round(abs(score), 2)
 
 
-# 🤖 AI MODEL LOGIC (safe)
+# 🤖 AI MODEL LOGIC
 def analyze_video_ai(video_path):
     if model is None:
+        print("[INFO] Using fallback logic")
         return analyze_video_logic(video_path)
 
     frames = extract_frames(video_path)
@@ -166,7 +170,6 @@ async def upload_video(file: UploadFile = File(...)):
 
     print("[DEBUG] File saved")
 
-    # 🔥 Use AI if available
     result, score = analyze_video_ai(file_path)
 
     print(f"[DEBUG] Result: {result}, Confidence: {score}")
