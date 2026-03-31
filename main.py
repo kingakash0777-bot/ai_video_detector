@@ -3,37 +3,22 @@ import shutil
 import cv2
 import os
 import numpy as np
-from tensorflow.keras.models import load_model
 
 app = FastAPI()
 
-# Ensure folders
+# Ensure folders exist
 os.makedirs("uploads", exist_ok=True)
-os.makedirs("model", exist_ok=True)
 
 # Load face detector
 face_cascade = cv2.CascadeClassifier("haarcascade_frontalface_default.xml")
 
-# 🔥 Safe AI model loading
-model = None
-MODEL_PATH = "model/deepfake_model.h5"
-
-try:
-    if os.path.exists(MODEL_PATH):
-        model = load_model(MODEL_PATH)
-        print("✅ AI model loaded successfully")
-    else:
-        print("⚠️ Model not found, using smart logic")
-        model = None
-except Exception as e:
-    print(f"❌ Model load failed: {e}")
-    model = None
+print("⚠️ Running WITHOUT AI model (Render safe mode)")
 
 
 # ✅ Home API
 @app.get("/")
 def home():
-    return {"message": "Server Running"}
+    return {"message": "AI Video Detector Running 🚀"}
 
 
 # 🎥 Extract frames
@@ -47,6 +32,7 @@ def extract_frames(video_path):
         if not ret:
             break
 
+        # Take every 10th frame
         if count % 10 == 0:
             frames.append(frame)
 
@@ -71,8 +57,8 @@ def detect_faces(frame):
     return len(faces)
 
 
-# 🧠 SMART LOGIC (fallback)
-def analyze_video_logic(video_path):
+# 🧠 SMART LOGIC (no AI model)
+def analyze_video(video_path):
     frames = extract_frames(video_path)
 
     if len(frames) == 0:
@@ -99,63 +85,28 @@ def analyze_video_logic(video_path):
 
     score = 0
 
+    # Face presence
     if avg_faces > 0.5:
         score += 0.4
 
+    # Blur check
     if avg_blur < 50:
         score -= 0.3
     else:
         score += 0.3
 
+    # Brightness check
     if avg_brightness < 60 or avg_brightness > 200:
         score -= 0.2
     else:
         score += 0.2
 
-    print(f"[DEBUG] Smart Score: {score:.2f}")
+    print(f"[DEBUG] Score: {score:.2f}")
 
     if score > 0:
         return "Likely Real", round(min(score, 1.0), 2)
     else:
         return "Likely Fake", round(abs(score), 2)
-
-
-# 🤖 AI MODEL LOGIC
-def analyze_video_ai(video_path):
-    if model is None:
-        print("[INFO] Using fallback logic")
-        return analyze_video_logic(video_path)
-
-    frames = extract_frames(video_path)
-
-    if len(frames) == 0:
-        return "Error", 0.0
-
-    predictions = []
-
-    for frame in frames:
-        try:
-            frame = cv2.resize(frame, (224, 224))
-            frame = frame / 255.0
-            frame = np.expand_dims(frame, axis=0)
-
-            pred = model.predict(frame, verbose=0)[0][0]
-            predictions.append(pred)
-
-        except Exception as e:
-            print(f"[ERROR] Prediction failed: {e}")
-
-    if len(predictions) == 0:
-        return "Error", 0.0
-
-    avg_pred = np.mean(predictions)
-
-    print(f"[DEBUG] AI Score: {avg_pred:.4f}")
-
-    if avg_pred > 0.5:
-        return "Likely Fake", float(avg_pred)
-    else:
-        return "Likely Real", float(1 - avg_pred)
 
 
 # 🚀 Upload API
@@ -170,7 +121,7 @@ async def upload_video(file: UploadFile = File(...)):
 
     print("[DEBUG] File saved")
 
-    result, score = analyze_video_ai(file_path)
+    result, score = analyze_video(file_path)
 
     print(f"[DEBUG] Result: {result}, Confidence: {score}")
 
