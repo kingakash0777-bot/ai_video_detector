@@ -3,9 +3,7 @@ import shutil
 import cv2
 import os
 import numpy as np
-
-# ❌ REMOVE tensorflow import for Railway stability (IMPORTANT)
-# from tensorflow.keras.models import load_model
+from tensorflow.keras.models import load_model
 
 app = FastAPI()
 
@@ -13,16 +11,23 @@ app = FastAPI()
 os.makedirs("uploads", exist_ok=True)
 os.makedirs("model", exist_ok=True)
 
-# Load face detector safely
+# Load face detector
 face_cascade = cv2.CascadeClassifier("haarcascade_frontalface_default.xml")
 
-if face_cascade.empty():
-    print("❌ Haarcascade file not loaded!")
-else:
-    print("✅ Face detector loaded")
-
-# 🚫 DISABLE AI MODEL (Railway can't handle it)
+# 🔥 Safe AI model loading
 model = None
+MODEL_PATH = "model/deepfake_model.h5"
+
+try:
+    if os.path.exists(MODEL_PATH):
+        model = load_model(MODEL_PATH)
+        print("✅ AI model loaded successfully")
+    else:
+        print("⚠️ Model not found, using smart logic")
+        model = None
+except Exception as e:
+    print(f"❌ Model load failed: {e}")
+    model = None
 
 
 # ✅ Home API
@@ -66,7 +71,7 @@ def detect_faces(frame):
     return len(faces)
 
 
-# 🧠 SMART LOGIC (lightweight - works on Railway)
+# 🧠 SMART LOGIC (fallback)
 def analyze_video_logic(video_path):
     frames = extract_frames(video_path)
 
@@ -115,6 +120,44 @@ def analyze_video_logic(video_path):
         return "Likely Fake", round(abs(score), 2)
 
 
+# 🤖 AI MODEL LOGIC
+def analyze_video_ai(video_path):
+    if model is None:
+        print("[INFO] Using fallback logic")
+        return analyze_video_logic(video_path)
+
+    frames = extract_frames(video_path)
+
+    if len(frames) == 0:
+        return "Error", 0.0
+
+    predictions = []
+
+    for frame in frames:
+        try:
+            frame = cv2.resize(frame, (224, 224))
+            frame = frame / 255.0
+            frame = np.expand_dims(frame, axis=0)
+
+            pred = model.predict(frame, verbose=0)[0][0]
+            predictions.append(pred)
+
+        except Exception as e:
+            print(f"[ERROR] Prediction failed: {e}")
+
+    if len(predictions) == 0:
+        return "Error", 0.0
+
+    avg_pred = np.mean(predictions)
+
+    print(f"[DEBUG] AI Score: {avg_pred:.4f}")
+
+    if avg_pred > 0.5:
+        return "Likely Fake", float(avg_pred)
+    else:
+        return "Likely Real", float(1 - avg_pred)
+
+
 # 🚀 Upload API
 @app.post("/upload")
 async def upload_video(file: UploadFile = File(...)):
@@ -127,7 +170,7 @@ async def upload_video(file: UploadFile = File(...)):
 
     print("[DEBUG] File saved")
 
-    result, score = analyze_video_logic(file_path)
+    result, score = analyze_video_ai(file_path)
 
     print(f"[DEBUG] Result: {result}, Confidence: {score}")
 
@@ -136,11 +179,3 @@ async def upload_video(file: UploadFile = File(...)):
         "result": result,
         "confidence": round(score, 2)
     }
-
-
-# ✅ IMPORTANT FOR RAILWAY
-import uvicorn
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
-    uvicorn.run("main:app", host="0.0.0.0", port=port)
