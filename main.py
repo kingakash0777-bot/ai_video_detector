@@ -14,15 +14,19 @@ os.makedirs("model", exist_ok=True)
 # Load face detector
 face_cascade = cv2.CascadeClassifier("haarcascade_frontalface_default.xml")
 
-# 🔥 Load AI model
+# 🔥 Load AI model safely
 model = None
 MODEL_PATH = "model/deepfake_model.h5"
 
-if os.path.exists(MODEL_PATH):
-    model = load_model(MODEL_PATH)
-    print("✅ AI model loaded successfully")
-else:
-    print("⚠️ No AI model found, using smart logic")
+try:
+    if os.path.exists(MODEL_PATH):
+        model = load_model(MODEL_PATH)
+        print("✅ AI model loaded successfully")
+    else:
+        print("⚠️ Model file not found, using smart logic")
+except Exception as e:
+    print(f"❌ Model load failed: {e}")
+    model = None
 
 
 # ✅ Home API
@@ -113,8 +117,11 @@ def analyze_video_logic(video_path):
         return "Likely Fake", round(abs(score), 2)
 
 
-# 🤖 AI MODEL LOGIC
+# 🤖 AI MODEL LOGIC (safe)
 def analyze_video_ai(video_path):
+    if model is None:
+        return analyze_video_logic(video_path)
+
     frames = extract_frames(video_path)
 
     if len(frames) == 0:
@@ -123,17 +130,19 @@ def analyze_video_ai(video_path):
     predictions = []
 
     for frame in frames:
-        # resize for model
-        frame = cv2.resize(frame, (224, 224))
+        try:
+            frame = cv2.resize(frame, (224, 224))
+            frame = frame / 255.0
+            frame = np.expand_dims(frame, axis=0)
 
-        # normalize
-        frame = frame / 255.0
+            pred = model.predict(frame, verbose=0)[0][0]
+            predictions.append(pred)
 
-        # expand dims
-        frame = np.expand_dims(frame, axis=0)
+        except Exception as e:
+            print(f"[ERROR] Prediction failed: {e}")
 
-        pred = model.predict(frame, verbose=0)[0][0]
-        predictions.append(pred)
+    if len(predictions) == 0:
+        return "Error", 0.0
 
     avg_pred = np.mean(predictions)
 
@@ -158,10 +167,7 @@ async def upload_video(file: UploadFile = File(...)):
     print("[DEBUG] File saved")
 
     # 🔥 Use AI if available
-    if model is not None:
-        result, score = analyze_video_ai(file_path)
-    else:
-        result, score = analyze_video_logic(file_path)
+    result, score = analyze_video_ai(file_path)
 
     print(f"[DEBUG] Result: {result}, Confidence: {score}")
 
