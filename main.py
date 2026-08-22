@@ -3,28 +3,38 @@ import shutil
 import cv2
 import os
 import numpy as np
+import uuid
 
 app = FastAPI()
 
-# Create upload folder
+# ==============================
+# FOLDERS
+# ==============================
+
 os.makedirs("uploads", exist_ok=True)
 
-# Get Haar cascade path safely
+# ==============================
+# FACE DETECTOR
+# ==============================
+
 CASCADE_PATH = os.path.join(
     os.path.dirname(__file__),
     "haarcascade_frontalface_default.xml"
 )
 
-# Load face detector
 face_cascade = cv2.CascadeClassifier(CASCADE_PATH)
 
 if face_cascade.empty():
-    print("WARNING: Face cascade could not be loaded")
+    print("❌ ERROR: Haar Cascade could not be loaded")
 else:
-    print("Face detector loaded successfully")
+    print("✅ Haar Cascade loaded successfully")
 
-print("Running WITHOUT AI model - Render safe mode")
+print("🚀 AI Video Detector started")
 
+
+# ==============================
+# HOME
+# ==============================
 
 @app.get("/")
 def home():
@@ -34,102 +44,158 @@ def home():
     }
 
 
-def extract_frames(video_path):
+# ==============================
+# FRAME ANALYSIS
+# ==============================
+
+def analyze_video(video_path):
+
     cap = cv2.VideoCapture(video_path)
-    frames = []
 
-    count = 0
+    if not cap.isOpened():
+        print("❌ Could not open video")
+        return "Error", 0.0
 
-    while True:
+    total_frames = int(
+        cap.get(cv2.CAP_PROP_FRAME_COUNT)
+    )
+
+    fps = cap.get(cv2.CAP_PROP_FPS)
+
+    print(
+        f"🎥 Total frames: {total_frames}, FPS: {fps}"
+    )
+
+    # Analyze maximum 30 frames
+    max_frames = 30
+
+    if total_frames <= 0:
+        cap.release()
+        return "Error", 0.0
+
+    step = max(
+        1,
+        total_frames // max_frames
+    )
+
+    brightness_values = []
+    blur_values = []
+    face_values = []
+
+    frame_number = 0
+    analyzed = 0
+
+    while cap.isOpened() and analyzed < max_frames:
+
         ret, frame = cap.read()
 
         if not ret:
             break
 
-        if count % 10 == 0:
-            frames.append(frame)
+        if frame_number % step == 0:
 
-        count += 1
+            try:
 
-        # Prevent extremely large processing
-        if len(frames) >= 30:
-            break
+                # Resize frame for faster processing
+                frame = cv2.resize(
+                    frame,
+                    (640, 360)
+                )
+
+                gray = cv2.cvtColor(
+                    frame,
+                    cv2.COLOR_BGR2GRAY
+                )
+
+                # --------------------------
+                # Brightness
+                # --------------------------
+
+                brightness = float(
+                    gray.mean()
+                )
+
+                brightness_values.append(
+                    brightness
+                )
+
+                # --------------------------
+                # Blur
+                # --------------------------
+
+                blur = cv2.Laplacian(
+                    gray,
+                    cv2.CV_64F
+                ).var()
+
+                blur_values.append(
+                    float(blur)
+                )
+
+                # --------------------------
+                # Face detection
+                # --------------------------
+
+                faces = face_cascade.detectMultiScale(
+                    gray,
+                    scaleFactor=1.3,
+                    minNeighbors=5
+                )
+
+                face_values.append(
+                    len(faces)
+                )
+
+                analyzed += 1
+
+            except Exception as e:
+
+                print(
+                    f"⚠️ Frame analysis error: {e}"
+                )
+
+        frame_number += 1
 
     cap.release()
 
-    print(f"Frames extracted: {len(frames)}")
-
-    return frames
-
-
-def get_blur_score(frame):
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-    return cv2.Laplacian(
-        gray,
-        cv2.CV_64F
-    ).var()
-
-
-def detect_faces(frame):
-
-    # If cascade is unavailable, simply return 0
-    if face_cascade.empty():
-        return 0
-
-    gray = cv2.cvtColor(
-        frame,
-        cv2.COLOR_BGR2GRAY
+    print(
+        f"✅ Analyzed {analyzed} frames"
     )
 
-    faces = face_cascade.detectMultiScale(
-        gray,
-        scaleFactor=1.3,
-        minNeighbors=5
-    )
-
-    return len(faces)
-
-
-def analyze_video(video_path):
-
-    frames = extract_frames(video_path)
-
-    if len(frames) == 0:
+    if analyzed == 0:
         return "Error", 0.0
 
-    brightness_list = []
-    blur_list = []
-    face_counts = []
+    # ==============================
+    # AVERAGES
+    # ==============================
 
-    for frame in frames:
-
-        gray = cv2.cvtColor(
-            frame,
-            cv2.COLOR_BGR2GRAY
-        )
-
-        brightness = gray.mean()
-
-        blur = get_blur_score(frame)
-
-        faces = detect_faces(frame)
-
-        brightness_list.append(brightness)
-        blur_list.append(blur)
-        face_counts.append(faces)
-
-    avg_brightness = float(
-        np.mean(brightness_list)
+    avg_brightness = np.mean(
+        brightness_values
     )
 
-    avg_blur = float(
-        np.mean(blur_list)
+    avg_blur = np.mean(
+        blur_values
     )
 
-    avg_faces = float(
-        np.mean(face_counts)
+    avg_faces = np.mean(
+        face_values
     )
+
+    print(
+        f"Brightness: {avg_brightness:.2f}"
+    )
+
+    print(
+        f"Blur: {avg_blur:.2f}"
+    )
+
+    print(
+        f"Faces: {avg_faces:.2f}"
+    )
+
+    # ==============================
+    # SCORING
+    # ==============================
 
     score = 0.0
 
@@ -144,49 +210,59 @@ def analyze_video(video_path):
         score += 0.3
 
     # Brightness
-    if avg_brightness < 60 or avg_brightness > 200:
-        score -= 0.2
-    else:
+    if 60 <= avg_brightness <= 200:
         score += 0.2
+    else:
+        score -= 0.2
 
     print(
-        f"Brightness: {avg_brightness:.2f}"
+        f"Final score: {score:.2f}"
     )
 
-    print(
-        f"Blur: {avg_blur:.2f}"
-    )
-
-    print(
-        f"Faces: {avg_faces:.2f}"
-    )
-
-    print(
-        f"Score: {score:.2f}"
-    )
+    # ==============================
+    # RESULT
+    # ==============================
 
     if score > 0:
 
+        confidence = min(
+            score,
+            1.0
+        )
+
         return (
             "Likely Real",
-            round(min(score, 1.0), 2)
+            round(confidence, 2)
         )
 
     else:
 
-        return (
-            "Likely Fake",
-            round(abs(score), 2)
+        confidence = min(
+            abs(score),
+            1.0
         )
 
+        return (
+            "Likely Fake",
+            round(confidence, 2)
+        )
+
+
+# ==============================
+# UPLOAD API
+# ==============================
 
 @app.post("/upload")
 async def upload_video(
     file: UploadFile = File(...)
 ):
 
-    # Protect filename
-    filename = os.path.basename(file.filename)
+    # Unique filename
+    filename = (
+        str(uuid.uuid4())
+        + "_"
+        + file.filename
+    )
 
     file_path = os.path.join(
         "uploads",
@@ -194,59 +270,72 @@ async def upload_video(
     )
 
     print(
-        f"Uploading: {filename}"
+        f"📥 Upload received: {file.filename}"
     )
-
-    with open(file_path, "wb") as buffer:
-
-        shutil.copyfileobj(
-            file.file,
-            buffer
-        )
-
-    print("File saved")
 
     try:
 
-        result, score = analyze_video(
+        # Save uploaded file
+        with open(
+            file_path,
+            "wb"
+        ) as buffer:
+
+            shutil.copyfileobj(
+                file.file,
+                buffer
+            )
+
+        print(
+            f"✅ File saved: {file_path}"
+        )
+
+        # Analyze
+        result, confidence = analyze_video(
             file_path
         )
 
         print(
-            f"Result: {result}"
+            f"🎯 Result: {result}"
         )
 
         print(
-            f"Confidence: {score}"
+            f"📊 Confidence: {confidence}"
         )
 
         return {
-            "filename": filename,
+            "filename": file.filename,
             "result": result,
-            "confidence": round(
-                score,
-                2
-            )
+            "confidence": confidence
         }
 
     except Exception as e:
 
         print(
-            f"Analysis error: {e}"
+            f"❌ Upload processing error: {e}"
         )
 
         return {
-            "filename": filename,
+            "filename": file.filename,
             "result": "Error",
             "confidence": 0.0,
-            "error": str(e)
+            "message": str(e)
         }
 
     finally:
 
-        # Delete uploaded video after processing
-        try:
-            if os.path.exists(file_path):
+        # Delete uploaded video
+        if os.path.exists(file_path):
+
+            try:
                 os.remove(file_path)
-        except Exception:
-            pass
+
+                print(
+                    "🗑️ Temporary video deleted"
+                )
+
+            except Exception as e:
+
+                print(
+                    f"⚠️ Could not delete file: {e}"
+                )
