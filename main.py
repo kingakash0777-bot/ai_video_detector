@@ -7,38 +7,20 @@ import uuid
 
 app = FastAPI()
 
-# =========================================================
-# FOLDERS
-# =========================================================
+# =====================================================
+# UPLOAD DIRECTORY
+# =====================================================
 
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-
-# =========================================================
-# FACE DETECTOR
-# =========================================================
-
-CASCADE_PATH = os.path.join(
-    os.path.dirname(__file__),
-    "haarcascade_frontalface_default.xml"
-)
-
-face_cascade = cv2.CascadeClassifier(CASCADE_PATH)
-
-if face_cascade.empty():
-    print("❌ ERROR: Haar Cascade could not be loaded")
-else:
-    print("✅ Haar Cascade loaded successfully")
+print("🚀 AI Video Detector starting...")
+print("⚠️ Running in Render lightweight mode")
 
 
-print("🚀 AI Video Detector started")
-print("⚠️ Running in lightweight detection mode")
-
-
-# =========================================================
+# =====================================================
 # HOME
-# =========================================================
+# =====================================================
 
 @app.get("/")
 def home():
@@ -48,9 +30,9 @@ def home():
     }
 
 
-# =========================================================
+# =====================================================
 # VIDEO ANALYSIS
-# =========================================================
+# =====================================================
 
 def analyze_video(video_path):
 
@@ -62,7 +44,6 @@ def analyze_video(video_path):
         print("❌ Could not open video")
         return "Error", 0.0
 
-    # Get video information
     total_frames = int(
         cap.get(cv2.CAP_PROP_FRAME_COUNT)
     )
@@ -77,21 +58,18 @@ def analyze_video(video_path):
         duration = total_frames / fps
 
     print(
-        f"🎬 Total frames: {total_frames}"
+        f"🎬 Frames: {total_frames}"
     )
 
     print(
-        f"⏱️ Video duration: {duration:.2f} seconds"
+        f"⏱️ Duration: {duration:.2f} seconds"
     )
 
     if total_frames <= 0:
         cap.release()
         return "Error", 0.0
 
-    # =====================================================
-    # SAMPLE ONLY 10 FRAMES
-    # =====================================================
-
+    # Analyze only 10 frames
     sample_count = min(
         10,
         total_frames
@@ -106,19 +84,17 @@ def analyze_video(video_path):
 
     brightness_values = []
     blur_values = []
-    face_values = []
 
-    analyzed_frames = 0
+    analyzed = 0
 
-    # =====================================================
-    # ANALYZE SELECTED FRAMES
-    # =====================================================
+    # =================================================
+    # SAMPLE FRAMES
+    # =================================================
 
     for position in positions:
 
         try:
 
-            # Jump directly to frame
             cap.set(
                 cv2.CAP_PROP_POS_FRAMES,
                 int(position)
@@ -132,21 +108,21 @@ def analyze_video(video_path):
                 )
                 continue
 
-            # Resize for faster processing
+            # Resize
             frame = cv2.resize(
                 frame,
                 (480, 270)
             )
 
-            # Convert to grayscale
+            # Grayscale
             gray = cv2.cvtColor(
                 frame,
                 cv2.COLOR_BGR2GRAY
             )
 
-            # =================================================
+            # -----------------------------------------
             # BRIGHTNESS
-            # =================================================
+            # -----------------------------------------
 
             brightness = float(
                 gray.mean()
@@ -156,9 +132,9 @@ def analyze_video(video_path):
                 brightness
             )
 
-            # =================================================
+            # -----------------------------------------
             # BLUR
-            # =================================================
+            # -----------------------------------------
 
             blur = cv2.Laplacian(
                 gray,
@@ -169,28 +145,10 @@ def analyze_video(video_path):
                 float(blur)
             )
 
-            # =================================================
-            # FACE DETECTION
-            # =================================================
-
-            faces = face_cascade.detectMultiScale(
-                gray,
-                scaleFactor=1.3,
-                minNeighbors=5,
-                minSize=(30, 30)
-            )
-
-            face_count = len(faces)
-
-            face_values.append(
-                face_count
-            )
-
-            analyzed_frames += 1
+            analyzed += 1
 
             print(
-                f"✅ Frame {analyzed_frames}/{sample_count} "
-                f"| Faces: {face_count} "
+                f"✅ Frame {analyzed}/{sample_count} "
                 f"| Brightness: {brightness:.1f} "
                 f"| Blur: {blur:.1f}"
             )
@@ -198,26 +156,26 @@ def analyze_video(video_path):
         except Exception as e:
 
             print(
-                f"⚠️ Frame analysis error: {e}"
+                f"⚠️ Frame error: {e}"
             )
 
     cap.release()
 
-    # =====================================================
-    # CHECK ANALYSIS
-    # =====================================================
+    # =================================================
+    # CHECK
+    # =================================================
 
-    if analyzed_frames == 0:
+    if analyzed == 0:
 
         print(
-            "❌ No frames could be analyzed"
+            "❌ No frames analyzed"
         )
 
         return "Error", 0.0
 
-    # =====================================================
-    # CALCULATE AVERAGES
-    # =====================================================
+    # =================================================
+    # AVERAGES
+    # =================================================
 
     avg_brightness = float(
         np.mean(brightness_values)
@@ -227,76 +185,49 @@ def analyze_video(video_path):
         np.mean(blur_values)
     )
 
-    avg_faces = float(
-        np.mean(face_values)
-    )
-
     print(
-        f"📊 Average brightness: "
+        f"💡 Average brightness: "
         f"{avg_brightness:.2f}"
     )
 
     print(
-        f"📊 Average blur: "
+        f"🔍 Average blur: "
         f"{avg_blur:.2f}"
     )
 
-    print(
-        f"📊 Average faces: "
-        f"{avg_faces:.2f}"
-    )
-
-    # =====================================================
+    # =================================================
     # SCORING
-    # =====================================================
+    # =================================================
 
     score = 0.0
 
-    # -----------------------------------------------------
-    # Face presence
-    # -----------------------------------------------------
-
-    if avg_faces > 0.5:
-
-        score += 0.4
-
-        print(
-            "✅ Face detected"
-        )
-
-    else:
-
-        print(
-            "⚠️ No consistent face detected"
-        )
-
-    # -----------------------------------------------------
-    # Blur
-    # -----------------------------------------------------
+    # -----------------------------------------
+    # BLUR
+    # -----------------------------------------
 
     if avg_blur < 50:
 
-        score -= 0.3
+        score -= 0.5
 
         print(
-            "⚠️ Video appears blurry"
+            "⚠️ Video is relatively blurry"
         )
 
     else:
 
-        score += 0.3
+        score += 0.5
 
         print(
             "✅ Video sharpness acceptable"
         )
 
-    # -----------------------------------------------------
-    # Brightness
-    # -----------------------------------------------------
+    # -----------------------------------------
+    # BRIGHTNESS
+    # -----------------------------------------
 
     if 60 <= avg_brightness <= 200:
 
-        score += 0.2
+        score += 0.5
 
         print(
             "✅ Brightness acceptable"
@@ -304,19 +235,19 @@ def analyze_video(video_path):
 
     else:
 
-        score -= 0.2
+        score -= 0.5
 
         print(
             "⚠️ Unusual brightness"
         )
 
+    # =================================================
+    # RESULT
+    # =================================================
+
     print(
         f"🧠 Final score: {score:.2f}"
     )
-
-    # =====================================================
-    # RESULT
-    # =====================================================
 
     if score > 0:
 
@@ -346,15 +277,15 @@ def analyze_video(video_path):
     )
 
     print(
-        f"📈 Confidence: {confidence}"
+        f"📊 Confidence: {confidence}"
     )
 
     return result, confidence
 
 
-# =========================================================
-# UPLOAD API
-# =========================================================
+# =====================================================
+# UPLOAD
+# =====================================================
 
 @app.post("/upload")
 async def upload_video(
@@ -365,8 +296,8 @@ async def upload_video(
         f"📥 Upload received: {file.filename}"
     )
 
-    # Create unique filename
-    safe_name = (
+    # Unique filename
+    filename = (
         str(uuid.uuid4())
         + "_"
         + os.path.basename(file.filename)
@@ -374,14 +305,14 @@ async def upload_video(
 
     file_path = os.path.join(
         UPLOAD_DIR,
-        safe_name
+        filename
     )
 
     try:
 
-        # =================================================
+        # ---------------------------------------------
         # SAVE VIDEO
-        # =================================================
+        # ---------------------------------------------
 
         with open(
             file_path,
@@ -394,20 +325,20 @@ async def upload_video(
             )
 
         print(
-            f"✅ Video saved: {file_path}"
+            "✅ Video saved successfully"
         )
 
-        # =================================================
+        # ---------------------------------------------
         # ANALYZE
-        # =================================================
+        # ---------------------------------------------
 
         result, confidence = analyze_video(
             file_path
         )
 
-        # =================================================
+        # ---------------------------------------------
         # RESPONSE
-        # =================================================
+        # ---------------------------------------------
 
         response = {
             "filename": file.filename,
@@ -416,7 +347,7 @@ async def upload_video(
         }
 
         print(
-            f"📤 Sending response: {response}"
+            f"📤 Response: {response}"
         )
 
         return response
@@ -436,17 +367,15 @@ async def upload_video(
 
     finally:
 
-        # =================================================
-        # DELETE TEMPORARY VIDEO
-        # =================================================
+        # ---------------------------------------------
+        # DELETE VIDEO
+        # ---------------------------------------------
 
         if os.path.exists(file_path):
 
             try:
 
-                os.remove(
-                    file_path
-                )
+                os.remove(file_path)
 
                 print(
                     "🗑️ Temporary video deleted"
@@ -455,5 +384,5 @@ async def upload_video(
             except Exception as e:
 
                 print(
-                    f"⚠️ Could not delete video: {e}"
+                    f"⚠️ Delete error: {e}"
                 )
