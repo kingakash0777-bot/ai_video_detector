@@ -6,59 +6,93 @@ import numpy as np
 
 app = FastAPI()
 
-# Ensure folders exist
+# Create upload folder
 os.makedirs("uploads", exist_ok=True)
 
+# Get Haar cascade path safely
+CASCADE_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "haarcascade_frontalface_default.xml"
+)
+
 # Load face detector
-face_cascade = cv2.CascadeClassifier("haarcascade_frontalface_default.xml")
+face_cascade = cv2.CascadeClassifier(CASCADE_PATH)
 
-print("⚠️ Running WITHOUT AI model (Render safe mode)")
+if face_cascade.empty():
+    print("WARNING: Face cascade could not be loaded")
+else:
+    print("Face detector loaded successfully")
+
+print("Running WITHOUT AI model - Render safe mode")
 
 
-# ✅ Home API
 @app.get("/")
 def home():
-    return {"message": "AI Video Detector Running 🚀"}
+    return {
+        "message": "AI Video Detector Running 🚀",
+        "status": "online"
+    }
 
 
-# 🎥 Extract frames
 def extract_frames(video_path):
     cap = cv2.VideoCapture(video_path)
     frames = []
 
     count = 0
-    while cap.isOpened():
+
+    while True:
         ret, frame = cap.read()
+
         if not ret:
             break
 
-        # Take every 10th frame
         if count % 10 == 0:
             frames.append(frame)
 
         count += 1
 
+        # Prevent extremely large processing
+        if len(frames) >= 30:
+            break
+
     cap.release()
 
-    print(f"[DEBUG] Frames extracted: {len(frames)}")
+    print(f"Frames extracted: {len(frames)}")
+
     return frames
 
 
-# 🔍 Blur detection
 def get_blur_score(frame):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    return cv2.Laplacian(gray, cv2.CV_64F).var()
+
+    return cv2.Laplacian(
+        gray,
+        cv2.CV_64F
+    ).var()
 
 
-# 👤 Face detection
 def detect_faces(frame):
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+
+    # If cascade is unavailable, simply return 0
+    if face_cascade.empty():
+        return 0
+
+    gray = cv2.cvtColor(
+        frame,
+        cv2.COLOR_BGR2GRAY
+    )
+
+    faces = face_cascade.detectMultiScale(
+        gray,
+        scaleFactor=1.3,
+        minNeighbors=5
+    )
+
     return len(faces)
 
 
-# 🧠 SMART LOGIC (no AI model)
 def analyze_video(video_path):
+
     frames = extract_frames(video_path)
 
     if len(frames) == 0:
@@ -69,64 +103,150 @@ def analyze_video(video_path):
     face_counts = []
 
     for frame in frames:
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+        gray = cv2.cvtColor(
+            frame,
+            cv2.COLOR_BGR2GRAY
+        )
 
         brightness = gray.mean()
+
         blur = get_blur_score(frame)
+
         faces = detect_faces(frame)
 
         brightness_list.append(brightness)
         blur_list.append(blur)
         face_counts.append(faces)
 
-    avg_brightness = np.mean(brightness_list)
-    avg_blur = np.mean(blur_list)
-    avg_faces = np.mean(face_counts)
+    avg_brightness = float(
+        np.mean(brightness_list)
+    )
 
-    score = 0
+    avg_blur = float(
+        np.mean(blur_list)
+    )
+
+    avg_faces = float(
+        np.mean(face_counts)
+    )
+
+    score = 0.0
 
     # Face presence
     if avg_faces > 0.5:
         score += 0.4
 
-    # Blur check
+    # Blur
     if avg_blur < 50:
         score -= 0.3
     else:
         score += 0.3
 
-    # Brightness check
+    # Brightness
     if avg_brightness < 60 or avg_brightness > 200:
         score -= 0.2
     else:
         score += 0.2
 
-    print(f"[DEBUG] Score: {score:.2f}")
+    print(
+        f"Brightness: {avg_brightness:.2f}"
+    )
+
+    print(
+        f"Blur: {avg_blur:.2f}"
+    )
+
+    print(
+        f"Faces: {avg_faces:.2f}"
+    )
+
+    print(
+        f"Score: {score:.2f}"
+    )
 
     if score > 0:
-        return "Likely Real", round(min(score, 1.0), 2)
+
+        return (
+            "Likely Real",
+            round(min(score, 1.0), 2)
+        )
+
     else:
-        return "Likely Fake", round(abs(score), 2)
+
+        return (
+            "Likely Fake",
+            round(abs(score), 2)
+        )
 
 
-# 🚀 Upload API
 @app.post("/upload")
-async def upload_video(file: UploadFile = File(...)):
-    file_path = f"uploads/{file.filename}"
+async def upload_video(
+    file: UploadFile = File(...)
+):
 
-    print(f"[DEBUG] Uploading: {file.filename}")
+    # Protect filename
+    filename = os.path.basename(file.filename)
+
+    file_path = os.path.join(
+        "uploads",
+        filename
+    )
+
+    print(
+        f"Uploading: {filename}"
+    )
 
     with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
 
-    print("[DEBUG] File saved")
+        shutil.copyfileobj(
+            file.file,
+            buffer
+        )
 
-    result, score = analyze_video(file_path)
+    print("File saved")
 
-    print(f"[DEBUG] Result: {result}, Confidence: {score}")
+    try:
 
-    return {
-        "filename": file.filename,
-        "result": result,
-        "confidence": round(score, 2)
-    }
+        result, score = analyze_video(
+            file_path
+        )
+
+        print(
+            f"Result: {result}"
+        )
+
+        print(
+            f"Confidence: {score}"
+        )
+
+        return {
+            "filename": filename,
+            "result": result,
+            "confidence": round(
+                score,
+                2
+            )
+        }
+
+    except Exception as e:
+
+        print(
+            f"Analysis error: {e}"
+        )
+
+        return {
+            "filename": filename,
+            "result": "Error",
+            "confidence": 0.0,
+            "error": str(e)
+        }
+
+    finally:
+
+        # Delete uploaded video after processing
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        except Exception:
+            pass
